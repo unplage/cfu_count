@@ -2,12 +2,12 @@
   "name": "菌落计数-基于机器学习的算法模型",
   "short_name": "cfu_count",
   "description": "计数平板菌落，还可以分析COCO类",
-  "start_url": "/cfu_cunt/",                /* 重要：根据部署路径修改 */
+  "start_url": "/cfu_cunt/",                
   "display": "standalone",
   "background_color": "#f5f5f5",
   "theme_color": "#4CAF50",
   "orientation": "portrait",
-  "scope": "/cfu_cunt/",                     /* 重要：与 start_url 保持一致 */
+  "scope": "/cfu_cunt/",                     
   "icons": [
     {
       "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%234CAF50' width='192' height='192' rx='20'/%3E%3Ctext x='96' y='120' font-size='80' text-anchor='middle' fill='white'%3EW%3C/text%3E%3C/svg%3E",
