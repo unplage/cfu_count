@@ -1,8 +1,8 @@
 {
   "name": "菌落计数-基于机器学习的算法模型",
-  "short_name": "cfu_count",
+  "short_name": "CFU_count",
   "description": "计数平板菌落，还可以分析COCO类",
-  "start_url": "/CFU_cunt/",                
+  "start_url": "/cfu_cunt/",                
   "display": "standalone",
   "background_color": "#f5f5f5",
   "theme_color": "#4CAF50",
