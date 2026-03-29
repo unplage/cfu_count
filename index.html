@@ -4,12 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
-    <link rel="manifest" href="./manifest.json">
-    <title>YOLO26 · 多类别检测器 (自动缓存)</title>
+    <title>YOLO26 · 双模检测器 (COCO/CFU·蓝点)</title>
     <!-- ONNX Runtime Web 1.20.0 -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.js"></script>
     <style>
-        /* 样式基本沿用之前，添加了类别选择器的样式 */
         :root {
             --primary: #3b82f6;
             --primary-dark: #1d4ed8;
@@ -52,8 +50,14 @@
         
         main { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 20px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
+        /* 模型选择器 */
+        .model-selector-panel { background: var(--card); border-radius: 20px; padding: 20px; }
+        .model-selector-title { font-size: 1rem; font-weight: 600; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
+        .model-selector-container select { width: 100%; padding: 12px; border-radius: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--secondary); font-size: 1rem; }
+        
         /* 类别选择器 */
-        .class-selector-panel { background: var(--card); border-radius: 20px; padding: 20px; }
+        .class-selector-panel { background: var(--card); border-radius: 20px; padding: 20px; transition: opacity 0.3s; }
+        .class-selector-panel.hidden { display: none; }
         .class-selector-title { font-size: 1rem; font-weight: 600; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
         .class-selector-container { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
         .class-selector-container select { flex: 1; min-width: 250px; background: var(--bg); color: var(--text); border: 1px solid var(--secondary); border-radius: 8px; padding: 8px; font-size: 0.9rem; height: 150px; }
@@ -75,6 +79,7 @@
         .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4); }
         .btn-secondary { background: var(--secondary); color: white; }
         .btn-success { background: var(--success); color: white; }
+        .btn-clear-cache { background: var(--warning); color: white; }
         input[type="file"] { display: none; }
         
         .viewer { display: none; flex-direction: column; gap: 20px; animation: fadeIn 0.5s; }
@@ -103,10 +108,40 @@
         #mainCanvas { display: block; width: auto; height: auto; background: #1e293b; max-width: none; }
         .overlay-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
         
+        /* 原有框样式 */
         .person-box { position: absolute; border: 3px solid var(--person-color); background: var(--person-bg); pointer-events: auto; cursor: pointer; z-index: 10; transition: all 0.2s; display: flex; flex-direction: column; }
         .person-box:hover { z-index: 20; border-color: #fff; background: rgba(0, 255, 136, 0.3); transform: scale(1.02); }
         .person-label { position: absolute; top: -28px; left: 0; background: var(--person-color); color: #000; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap; }
         .person-confidence { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.7); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+        
+        /* 新增：CFU 蓝点样式 */
+        .cfu-dot {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: #3366ff;   /* 蓝色实心 */
+            border: 1px solid white;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .cfu-dot:hover {
+            transform: scale(1.8);
+            background-color: #5588ff;
+        }
+        .cfu-label {
+            position: absolute;
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            white-space: nowrap;
+            pointer-events: none;
+            font-weight: bold;
+        }
         
         .stats-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
         .stat-box { background: var(--card); border-radius: 16px; padding: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.1); transition: transform 0.2s; }
@@ -145,7 +180,7 @@
     <!-- 启动屏：自动加载模型 -->
     <div class="splash" id="splash">
         <div class="splash-icon">🚶</div>
-        <div class="splash-text">YOLO26 多类别检测器</div>
+        <div class="splash-text">YOLO26 双模检测器</div>
         <div class="splash-subtitle">正在加载模型，请稍候...</div>
         
         <div class="loading-bar" id="loadingBar">
@@ -171,7 +206,7 @@
     <!-- 主应用界面 -->
     <div class="app">
         <header>
-            <h1><span>🚶</span><span>YOLO26 多类别检测器</span><span class="version-badge" id="versionBadge">yolo26n</span></h1>
+            <h1><span>🚶</span><span>YOLO26 双模检测器</span><span class="version-badge" id="versionBadge">yolo26n</span></h1>
             <div class="header-stats">
                 <span class="header-stat" id="modelStatus"><span>⏳</span><span>加载模型中...</span></span>
                 <span class="header-stat" id="detectedCount"><span>🔍</span><span>0个物体</span></span>
@@ -180,8 +215,19 @@
         </header>
         
         <main>
-            <!-- 类别选择器面板 -->
-            <div class="class-selector-panel">
+            <!-- 模型选择器 -->
+            <div class="model-selector-panel">
+                <div class="model-selector-title">🧬 选择检测模型</div>
+                <div class="model-selector-container">
+                    <select id="modelSelect">
+                        <option value="coco">通用物体检测 (COCO 80类)</option>
+                        <option value="cfu">菌落计数 (CFU) - 蓝点标记</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- 类别选择器 (仅对 COCO 模型有效) -->
+            <div class="class-selector-panel" id="classSelectorPanel">
                 <div class="class-selector-title">🎯 选择要检测的类别 (按住 Ctrl/Cmd 多选)</div>
                 <div class="class-selector-container">
                     <select id="classSelect" multiple size="10">
@@ -254,7 +300,7 @@
                             </div>
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                                 <input type="checkbox" id="showLabels" checked style="width: 18px; height: 18px;">
-                                <span>显示类别名称</span>
+                                <span>显示类别名称/编号</span>
                             </label>
                         </div>
                         <div class="slider-group">
@@ -289,6 +335,10 @@
                             </button>
                             <button class="btn btn-danger btn-small" onclick="resetApp()">
                                 <span>🗑️</span><span>清空</span>
+                            </button>
+                            <!-- 新增：清除模型缓存按钮 -->
+                            <button class="btn btn-clear-cache btn-small" onclick="clearModelCache()">
+                                <span>🧹</span><span>清除模型缓存</span>
                             </button>
                         </div>
                     </div>
@@ -337,6 +387,21 @@
         let modelLoaded = false;           // 模型是否加载成功
         let currentImage = null;            // 当前显示的图片 (Image 对象)
         let detections = [];                // 检测结果（已转换到原始图像坐标）
+        let currentModelType = 'coco';       // 当前模型类型: 'coco' 或 'cfu'
+        
+        // 模型配置
+        const MODEL_CONFIG = {
+            coco: {
+                url: 'yolo26n.onnx',
+                cacheKey: 'yolo26n_cached',
+                name: 'COCO 80类'
+            },
+            cfu: {
+                url: 'yolo26n-cfu-102.onnx',
+                cacheKey: 'yolo26n_cfu_cached',
+                name: '菌落计数 (CFU)'
+            }
+        };
         
         // COCO 类别列表 (80类)
         const COCO_CLASSES = [
@@ -358,9 +423,11 @@
         const canvas = document.getElementById('mainCanvas');
         const ctx = canvas.getContext('2d');
         const overlayLayer = document.getElementById('overlayLayer');
+        const classSelectorPanel = document.getElementById('classSelectorPanel');
+        const classSelect = document.getElementById('classSelect');
+        const modelSelect = document.getElementById('modelSelect');
         
         // ==================== 初始化类别选择器 ====================
-        const classSelect = document.getElementById('classSelect');
         COCO_CLASSES.forEach((name, index) => {
             const option = document.createElement('option');
             option.value = index;
@@ -378,6 +445,25 @@
         function selectPersonOnly() {
             Array.from(classSelect.options).forEach(opt => opt.selected = opt.textContent.includes('person'));
         }
+        
+        // ==================== 模型切换 ====================
+        modelSelect.addEventListener('change', async (e) => {
+            currentModelType = e.target.value;
+            
+            // 更新UI：如果是CFU模型，隐藏类别选择器；否则显示
+            if (currentModelType === 'cfu') {
+                classSelectorPanel.classList.add('hidden');
+            } else {
+                classSelectorPanel.classList.remove('hidden');
+            }
+            
+            // 清空当前检测结果
+            resetApp(false); // 不弹出确认框
+            
+            // 重新加载模型
+            showToast(`切换到 ${MODEL_CONFIG[currentModelType].name}，正在加载...`);
+            await loadModel();
+        });
         
         // ==================== PWA 安装 ====================
         let deferredPrompt;
@@ -424,9 +510,6 @@
         }
         
         // ==================== 模型缓存 (IndexedDB) ====================
-        const MODEL_URL = 'yolo26n.onnx';  // 与 index.html 同目录
-        const MODEL_CACHE_KEY = 'yolo26n_cached';
-        
         function openDB() {
             return new Promise((resolve, reject) => {
                 const request = indexedDB.open('YOLOModelDB', 1);
@@ -438,29 +521,29 @@
             });
         }
         
-        async function getCachedModel() {
+        async function getCachedModel(key) {
             const db = await openDB();
             return new Promise((resolve) => {
                 const tx = db.transaction('models', 'readonly');
                 const store = tx.objectStore('models');
-                const req = store.get(MODEL_CACHE_KEY);
+                const req = store.get(key);
                 req.onsuccess = () => resolve(req.result?.data);
                 req.onerror = () => resolve(null);
             });
         }
         
-        async function cacheModel(arrayBuffer) {
+        async function cacheModel(key, arrayBuffer) {
             const db = await openDB();
             return new Promise((resolve, reject) => {
                 const tx = db.transaction('models', 'readwrite');
                 const store = tx.objectStore('models');
-                const req = store.put({ key: MODEL_CACHE_KEY, data: arrayBuffer, timestamp: Date.now() });
+                const req = store.put({ key, data: arrayBuffer, timestamp: Date.now() });
                 req.onsuccess = resolve;
                 req.onerror = reject;
             });
         }
         
-        // ==================== 加载模型（自动缓存）- 修复版 ====================
+        // ==================== 加载模型（自动缓存） ====================
         async function loadModel() {
             document.getElementById('loadingBar').style.display = 'block';
             document.getElementById('loadingProgress').style.width = '0%';
@@ -468,44 +551,25 @@
             document.getElementById('loadingDetail').textContent = '';
             document.getElementById('errorBox').classList.remove('show');
             
+            const config = MODEL_CONFIG[currentModelType];
+            const modelUrl = config.url;
+            const cacheKey = config.cacheKey;
+            
             try {
-                // 关键修复1：配置WASM路径 - 使用与JS库完全匹配的版本
-                if (typeof ort === 'undefined') {
-                    throw new Error('ONNX Runtime 库未加载，请检查网络连接');
-                }
-                
-                // 使用与 ort.min.js 完全相同的版本 1.20.0
-                ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/';
-                
-                // 关键修复2：禁用多线程和SIMD，避免兼容性问题
-                //ort.env.wasm.numThreads = 1;
-                //ort.env.wasm.simd = false;
-                
-                // 关键修复3：设置代理模式，避免Worker问题
-                ort.env.wasm.proxy = false;
-                
-                logDebug(`WASM路径已设置: ${ort.env.wasm.wasmPaths}`);
-                
-                // 1. 尝试从缓存读取模型
-                let modelData = await getCachedModel();
+                // 1. 尝试从缓存读取
+                let modelData = await getCachedModel(cacheKey);
                 
                 if (modelData) {
-                    logDebug('从缓存加载模型');
+                    logDebug(`从缓存加载模型 (${currentModelType})`);
                     document.getElementById('loadingText').textContent = '从缓存加载模型...';
                     document.getElementById('loadingProgress').style.width = '50%';
                 } else {
-                    // 2. 从服务器下载模型
-                    logDebug('未找到缓存，开始下载模型');
+                    // 2. 从 GitHub 下载
+                    logDebug(`未找到缓存，开始下载模型 (${currentModelType})`);
                     document.getElementById('loadingText').textContent = '正在下载模型 (首次使用)...';
                     
-                    const response = await fetch(MODEL_URL, { 
-                        method: 'GET',
-                        cache: 'force-cache' // 尝试使用浏览器缓存
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText} - 请确保 ${MODEL_URL} 文件存在`);
-                    }
+                    const response = await fetch(modelUrl, { method: 'GET' });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     
                     const contentLength = response.headers.get('content-length');
                     const total = contentLength ? parseInt(contentLength) : 0;
@@ -528,7 +592,6 @@
                         }
                     }
                     
-                    // 合并chunks
                     const arrayBuffer = new Uint8Array(received);
                     let position = 0;
                     for (const chunk of chunks) {
@@ -538,50 +601,43 @@
                     
                     modelData = arrayBuffer.buffer;
                     
-                    // 存入IndexedDB缓存
-                    await cacheModel(modelData);
+                    // 存入缓存
+                    await cacheModel(cacheKey, modelData);
                     logDebug('模型已缓存到本地');
                 }
                 
                 document.getElementById('loadingProgress').style.width = '100%';
                 document.getElementById('loadingText').textContent = '正在初始化模型...';
                 
-                // 3. 初始化 ONNX Runtime - 使用更保守的配置
-                logDebug('正在创建推理会话...');
+                // 3. 初始化 ONNX Runtime
+                if (typeof ort === 'undefined') throw new Error('ONNX Runtime 库未加载');
                 
-                const sessionOptions = {
-                    executionProviders: ['wasm'], // 仅使用WASM，避免其他后端冲突
-                    graphOptimizationLevel: 'basic', // 使用basic级别，避免高级优化导致的问题
-                    logSeverityLevel: 2 // 显示警告和错误
-                };
+                // 配置 WASM 路径（使用 CDN，自动匹配 SIMD/线程）
+                ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/';
+                // 移除线程和 SIMD 限制，让 ORT 自动选择最优配置
+                // ort.env.wasm.numThreads = 1;
+                // ort.env.wasm.simd = false;
                 
-                session = await ort.InferenceSession.create(modelData, sessionOptions);
+                session = await ort.InferenceSession.create(modelData, {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'basic'
+                });
                 
                 modelLoaded = true;
-                logDebug(`模型加载成功！输入: ${session.inputNames.join(', ')}, 输出: ${session.outputNames.join(', ')}`);
+                logDebug(`模型加载成功，输入: ${session.inputNames[0]}, 输出: ${session.outputNames[0]}`);
                 
                 // 更新界面
                 document.getElementById('splash').classList.add('hidden');
-                document.getElementById('versionBadge').textContent = 'yolo26n';
-                document.getElementById('modelStatus').innerHTML = `<span>✅</span><span>yolo26n 已加载</span>`;
-                showToast('✅ 模型加载成功！');
+                document.getElementById('versionBadge').textContent = config.name;
+                document.getElementById('modelStatus').innerHTML = `<span>✅</span><span>${config.name} 已加载</span>`;
+                showToast(`✅ ${config.name} 加载成功！`);
                 
             } catch (error) {
                 let errorMsg = error.message || error.toString();
                 logDebug(`加载失败: ${errorMsg}`, true);
-                console.error('完整错误:', error);
-                
                 document.getElementById('loadingBar').style.display = 'none';
                 document.getElementById('loadingStatus').style.display = 'none';
-                document.getElementById('errorMessage').innerHTML = `
-                    <div style="margin-bottom: 10px;">${errorMsg}</div>
-                    <div style="font-size: 0.8rem; color: #94a3b8;">
-                        提示：如果问题持续存在，请检查：<br>
-                        1. 网络连接是否正常<br>
-                        2. 浏览器是否支持 WebAssembly<br>
-                        3. 是否有广告拦截器阻止了CDN资源加载
-                    </div>
-                `;
+                document.getElementById('errorMessage').innerHTML = errorMsg;
                 document.getElementById('errorBox').classList.add('show');
             }
         }
@@ -590,12 +646,33 @@
         window.addEventListener('load', loadModel);
         
         // 重试加载
-        window.retryLoadModel = function() {
-            document.getElementById('loadingBar').style.display = 'block';
-            document.getElementById('loadingStatus').style.display = 'block';
-            document.getElementById('errorBox').classList.remove('show');
+        function retryLoadModel() {
             loadModel();
-        };
+        }
+        
+        // ==================== 清除模型缓存 ====================
+        async function clearModelCache() {
+            if (!confirm('⚠️ 清除缓存后将删除所有已下载的模型，下次使用需要重新下载。是否继续？')) {
+                return;
+            }
+            
+            try {
+                const db = await openDB();
+                const tx = db.transaction('models', 'readwrite');
+                const store = tx.objectStore('models');
+                await store.clear();
+                await tx.done;
+                
+                showToast('🧹 模型缓存已清除');
+                logDebug('所有模型缓存已清除');
+                
+                // 重新加载当前模型（会重新下载）
+                await loadModel();
+            } catch (error) {
+                console.error('清除缓存失败:', error);
+                showToast('❌ 清除缓存失败: ' + error.message);
+            }
+        }
         
         // ==================== 图片上传处理 ====================
         document.getElementById('fileInput').addEventListener('change', handleFile);
@@ -664,14 +741,6 @@
                 return;
             }
             
-            // 获取选中的类别ID
-            const selectedOptions = Array.from(classSelect.selectedOptions);
-            if (selectedOptions.length === 0) {
-                showToast('⚠️ 请至少选择一个类别');
-                return;
-            }
-            const selectedClassIds = selectedOptions.map(opt => parseInt(opt.value));
-            
             document.getElementById('loadingOverlay').classList.add('active');
             const startTime = performance.now();
             
@@ -693,15 +762,36 @@
                 // 解析输出，得到原始图像坐标的检测框
                 const rawDetections = parseYOLOOutput(output, confThreshold, iouThreshold, inputSize, img.width, img.height, scale, padX, padY);
                 
-                // 过滤：只保留用户选择的类别
-                detections = rawDetections
-                    .filter(d => selectedClassIds.includes(d.classId))
-                    .map((d, idx) => ({
-                        ...d,
-                        id: idx,
-                        label: COCO_CLASSES[d.classId] || `class_${d.classId}`,
-                        displayLabel: COCO_CLASSES[d.classId] || `c${d.classId}`
-                    }));
+                // 根据当前模型类型处理检测结果
+                if (currentModelType === 'coco') {
+                    // COCO 模型：使用类别选择器过滤
+                    const selectedOptions = Array.from(classSelect.selectedOptions);
+                    if (selectedOptions.length === 0) {
+                        showToast('⚠️ 请至少选择一个类别');
+                        detections = [];
+                    } else {
+                        const selectedClassIds = selectedOptions.map(opt => parseInt(opt.value));
+                        detections = rawDetections
+                            .filter(d => selectedClassIds.includes(d.classId))
+                            .map((d, idx) => ({
+                                ...d,
+                                id: idx,
+                                label: COCO_CLASSES[d.classId] || `class_${d.classId}`,
+                                displayLabel: COCO_CLASSES[d.classId] || `c${d.classId}`
+                            }));
+                    }
+                } else {
+                    // CFU 模型：直接使用所有检测框（假设只有一个类别，classId 可能为0）
+                    detections = rawDetections
+                        .map((d, idx) => ({
+                            ...d,
+                            id: idx,
+                            label: 'cfu',
+                            displayLabel: `菌落 ${idx+1}`
+                        }));
+                }
+                
+                // tensor.dispose(); // 已确认无此方法，故注释
                 
                 const processTime = Math.round(performance.now() - startTime);
                 updateStats(processTime);
@@ -831,6 +921,7 @@
             return picked;
         }
         
+        // ==================== 渲染检测结果（修改点：CFU模型使用蓝点）====================
         function renderDetections() {
             overlayLayer.innerHTML = '';
             
@@ -838,47 +929,81 @@
             const showLabels = document.getElementById('showLabels').checked;
             const showConfidence = document.getElementById('showConfidence').checked;
             
-            detections.forEach((det, idx) => {
-                const x = det.x1 * zoom;
-                const y = det.y1 * zoom;
-                const width = (det.x2 - det.x1) * zoom;
-                const height = (det.y2 - det.y1) * zoom;
-                
-                // 根据类别生成颜色
-                const hue = (det.classId * 37) % 360;  // 简单的哈希
-                const borderColor = `hsl(${hue}, 80%, 60%)`;
-                
-                const box = document.createElement('div');
-                box.className = 'person-box';  // 复用样式，但边框颜色动态
-                box.style.left = x + 'px';
-                box.style.top = y + 'px';
-                box.style.width = width + 'px';
-                box.style.height = height + 'px';
-                box.style.borderColor = borderColor;
-                box.style.background = `hsla(${hue}, 80%, 60%, 0.2)`;
-                
-                if (showLabels) {
-                    const label = document.createElement('div');
-                    label.className = 'person-label';
-                    label.textContent = `${idx + 1}. ${det.displayLabel}`;
-                    label.style.backgroundColor = borderColor;
-                    label.style.color = '#000';
-                    box.appendChild(label);
-                }
-                
-                if (showConfidence) {
-                    const conf = document.createElement('div');
-                    conf.className = 'person-confidence';
-                    conf.textContent = `${(det.confidence * 100).toFixed(0)}%`;
-                    box.appendChild(conf);
-                }
-                
-                box.onclick = () => {
-                    showToast(`🔍 ${det.displayLabel} | 置信度: ${(det.confidence * 100).toFixed(1)}%`);
-                };
-                
-                overlayLayer.appendChild(box);
-            });
+            if (currentModelType === 'cfu') {
+                // CFU 模型：绘制蓝色实心点（中心点）
+                detections.forEach((det, idx) => {
+                    // 计算中心点坐标（原始坐标 * zoom）
+                    const cx = ((det.x1 + det.x2) / 2) * zoom;
+                    const cy = ((det.y1 + det.y2) / 2) * zoom;
+                    
+                    // 绘制圆点（直径为6px，偏移3px使其中心对齐）
+                    const dot = document.createElement('div');
+                    dot.className = 'cfu-dot';
+                    dot.style.left = (cx - 3) + 'px';
+                    dot.style.top = (cy - 3) + 'px';
+                    
+                    // 点击事件
+                    dot.onclick = () => {
+                        showToast(`🔍 菌落 #${idx+1} | 置信度: ${(det.confidence*100).toFixed(1)}%`);
+                    };
+                    overlayLayer.appendChild(dot);
+                    
+                    // 如果需要显示标签（序号/置信度）
+                    if (showLabels || showConfidence) {
+                        const label = document.createElement('div');
+                        label.className = 'cfu-label';
+                        label.style.left = (cx + 6) + 'px';
+                        label.style.top = (cy - 8) + 'px';
+                        let text = `${idx+1}`;
+                        if (showConfidence) text += ` ${(det.confidence*100).toFixed(0)}%`;
+                        label.textContent = text;
+                        overlayLayer.appendChild(label);
+                    }
+                });
+            } else {
+                // COCO 模型：原有框绘制
+                detections.forEach((det, idx) => {
+                    const x = det.x1 * zoom;
+                    const y = det.y1 * zoom;
+                    const width = (det.x2 - det.x1) * zoom;
+                    const height = (det.y2 - det.y1) * zoom;
+                    
+                    // 根据类别生成颜色（使用简单的哈希）
+                    const hue = (det.classId * 37) % 360;
+                    const borderColor = `hsl(${hue}, 80%, 60%)`;
+                    
+                    const box = document.createElement('div');
+                    box.className = 'person-box';
+                    box.style.left = x + 'px';
+                    box.style.top = y + 'px';
+                    box.style.width = width + 'px';
+                    box.style.height = height + 'px';
+                    box.style.borderColor = borderColor;
+                    box.style.background = `hsla(${hue}, 80%, 60%, 0.2)`;
+                    
+                    if (showLabels) {
+                        const label = document.createElement('div');
+                        label.className = 'person-label';
+                        label.textContent = det.displayLabel;
+                        label.style.backgroundColor = borderColor;
+                        label.style.color = '#000';
+                        box.appendChild(label);
+                    }
+                    
+                    if (showConfidence) {
+                        const conf = document.createElement('div');
+                        conf.className = 'person-confidence';
+                        conf.textContent = `${(det.confidence * 100).toFixed(0)}%`;
+                        box.appendChild(conf);
+                    }
+                    
+                    box.onclick = () => {
+                        showToast(`🔍 ${det.displayLabel} | 置信度: ${(det.confidence * 100).toFixed(1)}%`);
+                    };
+                    
+                    overlayLayer.appendChild(box);
+                });
+            }
         }
         
         function updateStats(processTime) {
@@ -933,16 +1058,36 @@
                 const width = x2 - x1;
                 const height = y2 - y1;
                 
-                const hue = (classId * 37) % 360;
-                eCtx.strokeStyle = `hsl(${hue}, 80%, 60%)`;
-                eCtx.strokeRect(x1, y1, width, height);
-                
-                const label = `${idx + 1}. ${COCO_CLASSES[classId]} ${(confidence*100).toFixed(0)}%`;
-                const metrics = eCtx.measureText(label);
-                eCtx.fillStyle = `hsla(${hue}, 80%, 60%, 0.8)`;
-                eCtx.fillRect(x1, y1 - 25, metrics.width + 10, 25);
-                eCtx.fillStyle = '#000';
-                eCtx.fillText(label, x1 + 5, y1 - 7);
+                if (currentModelType === 'cfu') {
+                    // 保存时也绘制蓝色点（但为了清晰，可以保留框或点，这里简单绘制一个蓝色点）
+                    const cx = (x1 + x2) / 2;
+                    const cy = (y1 + y2) / 2;
+                    eCtx.fillStyle = '#3366ff';
+                    eCtx.beginPath();
+                    eCtx.arc(cx, cy, 5, 0, 2 * Math.PI);
+                    eCtx.fill();
+                    eCtx.strokeStyle = 'white';
+                    eCtx.lineWidth = 1;
+                    eCtx.stroke();
+                    
+                    let label = `#${idx+1}`;
+                    if (document.getElementById('showConfidence').checked) label += ` ${(confidence*100).toFixed(0)}%`;
+                    eCtx.fillStyle = 'black';
+                    eCtx.font = 'bold 12px Arial';
+                    eCtx.fillText(label, cx + 8, cy - 8);
+                } else {
+                    // COCO 模型保持框
+                    const hue = (classId * 37) % 360;
+                    eCtx.strokeStyle = `hsl(${hue}, 80%, 60%)`;
+                    eCtx.strokeRect(x1, y1, width, height);
+                    
+                    const label = `${idx + 1}. ${COCO_CLASSES[classId] || '未知'} ${(confidence*100).toFixed(0)}%`;
+                    const metrics = eCtx.measureText(label);
+                    eCtx.fillStyle = `hsla(${hue}, 80%, 60%, 0.8)`;
+                    eCtx.fillRect(x1, y1 - 25, metrics.width + 10, 25);
+                    eCtx.fillStyle = '#000';
+                    eCtx.fillText(label, x1 + 5, y1 - 7);
+                }
             });
             
             const link = document.createElement('a');
@@ -953,26 +1098,33 @@
         }
         
         function copyStats() {
-            const selectedClasses = Array.from(classSelect.selectedOptions).map(opt => opt.textContent).join(', ');
+            let selectedInfo = '';
+            if (currentModelType === 'coco') {
+                const selectedClasses = Array.from(classSelect.selectedOptions).map(opt => opt.textContent).join(', ');
+                selectedInfo = `选中类别：${selectedClasses || '无'}`;
+            } else {
+                selectedInfo = '模型：菌落计数 (CFU)';
+            }
+            
             const stats = `检测结果：
 检测到物体数：${detections.length}
 平均置信度：${document.getElementById('statAvgConfidence').textContent}
 处理时间：${document.getElementById('statProcessTime').textContent}
 图像尺寸：${document.getElementById('statImageSize').textContent}
-选中类别：${selectedClasses || '无'}`;
+${selectedInfo}`;
             
             navigator.clipboard.writeText(stats).then(() => showToast('📋 统计信息已复制'));
         }
         
-        function resetApp() {
-            if (confirm('确定清空所有内容？')) {
-                currentImage = null;
-                detections = [];
-                uploadCard.style.display = 'block';
-                viewer.classList.remove('active');
-                overlayLayer.innerHTML = '';
-                document.getElementById('detectedCount').innerHTML = '<span>🔍</span><span>0个物体</span>';
-            }
+        function resetApp(confirmNeeded = true) {
+            if (confirmNeeded && !confirm('确定清空所有内容？')) return;
+            
+            currentImage = null;
+            detections = [];
+            uploadCard.style.display = 'block';
+            viewer.classList.remove('active');
+            overlayLayer.innerHTML = '';
+            document.getElementById('detectedCount').innerHTML = '<span>🔍</span><span>0个物体</span>';
         }
     </script>
 </body>
