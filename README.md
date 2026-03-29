@@ -1,5 +1,6 @@
-# cfu_cunt平板菌落计数
+# cfu_cunt平板菌落计数；
 https://unplage.github.io/cfu_cunt
 count CFU
-CV算法差强人意，后续计划使用自有数据训练YOLO人工智能模型，集成到此PWA
-https://github.com/ultralytics/assets/releases
+基于YOLO模型构建：通用识别模型；微调计数菌落模型；
+菌落识别模型基于102张真实世界菌落平板（黑底），精度满足日常实验，后期可增加训练图片张数来提高精度；
+可手动调节置信区间和loU值；
