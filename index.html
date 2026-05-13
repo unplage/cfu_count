@@ -1128,5 +1128,16 @@ ${selectedInfo}`;
             document.getElementById('detectedCount').innerHTML = '<span>🔍</span><span>0个物体</span>';
         }
     </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        // 注意：如果站点在子目录（如 /project/），注册路径需要包含子目录前缀
+        // 一般使用相对路径 './sv.js' 或绝对路径 '/project/sv.js'
+        navigator.serviceWorker.register('./sv.js').then(reg => {
+          console.log('Service Worker 注册成功，作用域:', reg.scope);
+        }).catch(err => {
+          console.error('Service Worker 注册失败:', err);
+        });
+      }
+    </script>
 </body>
 </html>
