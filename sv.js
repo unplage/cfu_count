@@ -1,113 +1,123 @@
-// sv.js - 通用 GitHub Pages 缓存 Service Worker
-// 策略：
-// - 导航/HTML 请求：网络优先 (Network First)，网络失败时回退缓存
-// - 静态资源 (js,css,图片,字体等)：缓存优先 (Cache First)，缓存缺失时请求网络并缓存
-// - 同源请求有效，跨域请求不处理
+// sv.js - 为“智能资产配置器 Pro Max”定制的 Service Worker
+// 确保离线可访问，预缓存首页、manifest 及关键资源
 
-const CACHE_NAME = 'gh-pages-cache-v1';      // 缓存版本，修改后会自动更新
-const STATIC_EXTENSIONS = ['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'woff', 'woff2', 'ttf', 'eot'];
+const CACHE_NAME = 'asset-config-cache-v1';
+// 需要预缓存的关键资源列表（可根据实际扩展）
+const PRECACHE_URLS = [
+  '/',               // 根路径（返回 index.html）
+  '/index.html',     // 显式 HTML 文件
+  '/manifest.json'   // PWA 清单文件
+  // 如果你有图标文件，请在这里添加，例如 '/favicon.ico', '/logo192.png' 等
+];
 
-// 判断是否为静态资源（基于扩展名）
+// 静态资源扩展名（用于未来拆分文件时使用）
+const STATIC_EXTENSIONS = ['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'woff', 'woff2', 'ttf', 'eot', 'ico'];
+
+// 判断请求是否为静态资源
 function isStaticResource(url) {
   const ext = url.pathname.split('.').pop().toLowerCase();
   return STATIC_EXTENSIONS.includes(ext);
 }
 
-// 判断是否为导航请求（页面主体加载）
+// 判断请求是否为主文档导航
 function isNavigateRequest(request) {
   return request.mode === 'navigate' || (request.method === 'GET' && request.destination === 'document');
 }
 
-// 安装事件 - 可选预缓存（这里默认不做预缓存，保持通用，可自行取消注释）
+// 安装阶段：预缓存关键资源
 self.addEventListener('install', (event) => {
-  console.log('[SW] Install');
-  // 强制等待中的 SW 立即激活
-  self.skipWaiting();
+  console.log('[SW] 安装中...');
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => {
+        console.log('[SW] 预缓存资源:', PRECACHE_URLS);
+        // 添加所有预缓存资源，如果某个资源 404 不影响整体（用 catch 忽略单个失败）
+        return Promise.allSettled(
+          PRECACHE_URLS.map(url => cache.add(url).catch(err => console.warn(`预缓存失败 ${url}:`, err)))
+        );
+      })
+      .then(() => self.skipWaiting()) // 立即激活
+  );
 });
 
-// 激活事件 - 清理旧缓存，控制所有未控制的客户端
+// 激活阶段：清理旧缓存，接管所有客户端
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activate');
+  console.log('[SW] 激活中...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
+    caches.keys().then(cacheNames => {
       return Promise.all(
-        cacheNames.map((cache) => {
+        cacheNames.map(cache => {
           if (cache !== CACHE_NAME) {
-            console.log('[SW] 删除旧缓存', cache);
+            console.log('[SW] 删除旧缓存:', cache);
             return caches.delete(cache);
           }
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => self.clients.claim()) // 立即控制所有页面
   );
 });
 
-// 主请求拦截逻辑
+// 请求拦截：核心缓存策略
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // 只处理同源 GET 请求（避免跨域、POST 等复杂情况）
+  // 只处理同源 GET 请求
   if (url.origin !== location.origin || request.method !== 'GET') {
     return;
   }
 
-  // ---------- 1. 导航请求（HTML 页面）采用 Network First ----------
+  // ---------- 1. 导航请求（HTML 页面）：网络优先，失败回退缓存 ----------
   if (isNavigateRequest(request)) {
     event.respondWith(
-      fetch(request).then((networkResponse) => {
-        // 网络请求成功，克隆并存入缓存
-        if (networkResponse && networkResponse.status === 200) {
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseClone);
-          });
-        }
-        return networkResponse;
-      }).catch(async () => {
-        // 网络失败，尝试从缓存中获取
-        const cachedResponse = await caches.match(request);
-        if (cachedResponse) {
-          console.log('[SW] 使用缓存 HTML:', url.pathname);
-          return cachedResponse;
-        }
-        // 连缓存都没有，返回一个简单的离线提示
-        return new Response(
-          '<h1>你现在处于离线状态</h1><p>请检查网络连接，并重新加载此页面。</p>',
-          { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/html' } }
-        );
-      })
+      fetch(request)
+        .then(networkResponse => {
+          // 成功时：缓存最新版本并返回
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          // 网络失败：尝试从缓存中获取
+          const cachedResponse = await caches.match(request);
+          if (cachedResponse) {
+            console.log('[SW] 离线模式，使用缓存页面:', url.pathname);
+            return cachedResponse;
+          }
+          // 连缓存都没有（极少数情况），返回简单离线页
+          return new Response(
+            '<h1>📴 离线状态</h1><p>请检查网络连接后刷新页面。</p><p>您的资产配置数据仍安全存储在本地。</p>',
+            { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/html' } }
+          );
+        })
     );
     return;
   }
 
-  // ---------- 2. 静态资源（JS/CSS/图片等）采用 Cache First ----------
+  // ---------- 2. 静态资源请求：缓存优先，未命中则网络请求并缓存 ----------
   if (isStaticResource(url)) {
     event.respondWith(
-      caches.match(request).then((cachedResponse) => {
+      caches.match(request).then(cachedResponse => {
         if (cachedResponse) {
-          // 命中缓存，直接返回（同时后台静默更新缓存，保持新鲜，可选）
-          // 这里为了简单，不做 stale-while-revalidate，有需要可以自行添加
           return cachedResponse;
         }
-        // 缓存缺失，请求网络并存入缓存
-        return fetch(request).then((networkResponse) => {
+        return fetch(request).then(networkResponse => {
           if (networkResponse && networkResponse.status === 200) {
             const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, responseClone);
-            });
+            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
           }
           return networkResponse;
         }).catch(() => {
-          // 网络失败且无缓存，返回空（让浏览器的默认错误页面处理）
-          return new Response('Resource not available offline', { status: 408 });
+          // 彻底离线且无缓存，返回空响应
+          return new Response('', { status: 408 });
         });
       })
     );
     return;
   }
 
-  // 其他类型的请求（如 API、其他同源请求）默认走网络，不缓存
-  // 如果需要，可自行添加策略
+  // ---------- 3. 其他请求（如 API、数据接口）默认不缓存，走网络 ----------
+  // （你的所有业务数据都在 IndexedDB，不受影响）
 });
