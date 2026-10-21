@@ -5,21 +5,26 @@
 // 获取当前 sw.js 所在的目录路径（例如 '/pwa1/'）
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突
-// 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v1`;
+// 例如 '/pwa1/' -> 'pwa-cache-pwa1-v3'
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v3`;
+// ONNX Runtime 的 CDN 资源单独缓存（跨版本隔离，激活时不清理）
+const CDN_CACHE_NAME = 'ort-cdn-v1';
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
   BASE_PATH,                 // 例如 '/pwa1/'
   `${BASE_PATH}index.html`,
   `${BASE_PATH}manifest.json`,
-  // 如果有图标，可以追加，例如：
-  // `${BASE_PATH}favicon.ico`,
-  // `${BASE_PATH}logo192.png`,
+  `${BASE_PATH}icons/icon-192.png`,
+  `${BASE_PATH}icons/icon-512.png`,
+  `${BASE_PATH}icons/icon-maskable-192.png`,
+  `${BASE_PATH}icons/icon-maskable-512.png`,
+  `${BASE_PATH}icons/favicon.ico`,
+  `${BASE_PATH}icons/apple-touch-icon-180.png`,
 ];
 
 // 静态资源扩展名（用于判断是否缓存优先）
-const STATIC_EXTENSIONS = ['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'woff', 'woff2', 'ttf', 'eot', 'ico'];
+const STATIC_EXTENSIONS = ['js', 'css', 'json', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'woff', 'woff2', 'ttf', 'eot', 'ico', 'wasm'];
 
 // ---------- 2. 工具函数 ----------
 function isStaticResource(url) {
@@ -29,6 +34,23 @@ function isStaticResource(url) {
 
 function isNavigateRequest(request) {
   return request.mode === 'navigate' || (request.method === 'GET' && request.destination === 'document');
+}
+
+// 缓存优先策略：命中缓存直接返回，否则请求网络并写入缓存
+function cacheFirst(request, cacheName) {
+  return caches.open(cacheName).then(cache =>
+    cache.match(request).then(cachedResponse => {
+      if (cachedResponse) return cachedResponse;
+      return fetch(request).then(networkResponse => {
+        // 仅缓存成功的 GET 响应（opaque 响应也可缓存，便于离线使用）
+        if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+          const responseClone = networkResponse.clone();
+          cache.put(request, responseClone).catch(err => console.warn('[SW] 写入缓存失败:', err));
+        }
+        return networkResponse;
+      }).catch(() => new Response('', { status: 408 }));
+    })
+  );
 }
 
 // ---------- 3. 安装阶段 ----------
@@ -68,10 +90,19 @@ self.addEventListener('activate', (event) => {
 // ---------- 5. 请求拦截 ----------
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method !== 'GET') {
+    return;
+  }
   const url = new URL(request.url);
 
-  // 只处理同源 GET 请求
-  if (url.origin !== location.origin || request.method !== 'GET') {
+  // ----- 5.0 ONNX Runtime CDN 资源：缓存优先，首次联网后支持离线推理 -----
+  if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('/onnxruntime-web@')) {
+    event.respondWith(cacheFirst(request, CDN_CACHE_NAME));
+    return;
+  }
+
+  // 其余只处理同源请求
+  if (url.origin !== location.origin) {
     return;
   }
 
@@ -106,23 +137,7 @@ self.addEventListener('fetch', (event) => {
 
   // ----- 5.2 静态资源请求：缓存优先，未命中则网络请求并缓存 -----
   if (isStaticResource(url)) {
-    event.respondWith(
-      caches.match(request).then(cachedResponse => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(request).then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
-          }
-          return networkResponse;
-        }).catch(() => {
-          // 完全离线且无缓存，返回空响应（可自定义）
-          return new Response('', { status: 408 });
-        });
-      })
-    );
+    event.respondWith(cacheFirst(request, CACHE_NAME));
     return;
   }
 

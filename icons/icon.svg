@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="菌落计数 Petri dish icon">
+  <title>菌落计数 CFU Count</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <clipPath id="round">
+      <rect width="512" height="512" rx="113"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <circle cx="256" cy="256" r="172" fill="#60a5fa" opacity="0.24"/>
+    <circle cx="256" cy="256" r="166" fill="#eef3fb"/>
+    <circle cx="256" cy="256" r="166" fill="none" stroke="#9fc0f0" stroke-width="18"/>
+    <circle cx="256" cy="256" r="147" fill="none" stroke="#c7d7f0" stroke-width="4"/>
+    <g>
+      <circle cx="169.5" cy="182.8" r="26.6" fill="#2f6bff"/>
+      <circle cx="272.6" cy="159.5" r="20.0" fill="#3b82f6"/>
+      <circle cx="347.5" cy="206.1" r="28.3" fill="#2556d6"/>
+      <circle cx="156.1" cy="269.3" r="21.6" fill="#4d8cff"/>
+      <circle cx="226.0" cy="246.0" r="33.3" fill="#2f6bff"/>
+      <circle cx="302.6" cy="276.0" r="23.3" fill="#3b82f6"/>
+      <circle cx="359.2" cy="312.6" r="20.0" fill="#2556d6"/>
+      <circle cx="199.4" cy="347.5" r="26.6" fill="#4d8cff"/>
+      <circle cx="266.0" cy="359.2" r="18.3" fill="#2f6bff"/>
+      <circle cx="310.9" cy="152.8" r="15.0" fill="#3b82f6"/>
+    </g>
+    <g fill="#ffffff" opacity="0.41">
+      <circle cx="159.4" cy="172.7" r="9.6"/>
+      <circle cx="265.0" cy="151.9" r="7.2"/>
+      <circle cx="336.7" cy="195.3" r="10.2"/>
+      <circle cx="147.9" cy="261.1" r="7.8"/>
+      <circle cx="213.3" cy="233.3" r="12.0"/>
+      <circle cx="293.7" cy="267.1" r="8.4"/>
+      <circle cx="351.6" cy="305.0" r="7.2"/>
+      <circle cx="189.3" cy="337.4" r="9.6"/>
+      <circle cx="259.0" cy="352.6" r="6.6"/>
+      <circle cx="305.2" cy="147.1" r="5.4"/>
+    </g>
+  </g>
+</svg>

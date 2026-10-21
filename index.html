@@ -4,8 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CFU计数">
     <title>YOLO26 · 双模检测器 (COCO/CFU·蓝点)</title>
     <link rel="manifest" href="./manifest.json">
+    <link rel="icon" href="./icons/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon-180.png">
     <!-- ONNX Runtime Web 1.20.0 -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.min.js"></script>
     <style>
@@ -200,6 +207,7 @@
             <strong>❌ 加载失败</strong>
             <div id="errorMessage"></div>
             <button class="retry-btn" onclick="retryLoadModel()">重试</button>
+            <button class="retry-btn" id="continueBtn" onclick="dismissError()" style="display:none; margin-left:8px;">继续使用当前模型</button>
             <div class="debug-info" id="debugInfo" style="display: none;"></div>
         </div>
     </div>
@@ -210,8 +218,8 @@
             <h1><span>🚶</span><span>YOLO26 双模检测器</span><span class="version-badge" id="versionBadge">yolo26n</span></h1>
             <div class="header-stats">
                 <span class="header-stat" id="modelStatus"><span>⏳</span><span>加载模型中...</span></span>
-                <span class="header-stat" id="detectedCount"><span>🔍</span><span>0个物体</span></span>
-                <span class="header-stat" id="fpsStat"><span>⚡</span><span>0 FPS</span></span>
+                <span class="header-stat" id="detectedCount"><span>🔍</span><span>0个菌落</span></span>
+                <span class="header-stat" id="fpsStat"><span>⚡</span><span>0ms</span></span>
             </div>
         </header>
         
@@ -221,14 +229,14 @@
                 <div class="model-selector-title">🧬 选择检测模型</div>
                 <div class="model-selector-container">
                     <select id="modelSelect">
+                        <option value="cfu" selected>菌落计数 (CFU) - 蓝点标记</option>
                         <option value="coco">通用物体检测 (COCO 80类)</option>
-                        <option value="cfu">菌落计数 (CFU) - 蓝点标记</option>
                     </select>
                 </div>
             </div>
             
             <!-- 类别选择器 (仅对 COCO 模型有效) -->
-            <div class="class-selector-panel" id="classSelectorPanel">
+            <div class="class-selector-panel hidden" id="classSelectorPanel">
                 <div class="class-selector-title">🎯 选择要检测的类别 (按住 Ctrl/Cmd 多选)</div>
                 <div class="class-selector-container">
                     <select id="classSelect" multiple size="10">
@@ -270,9 +278,9 @@
                         <div class="slider-group">
                             <div class="slider-header">
                                 <span class="slider-label">置信度阈值</span>
-                                <span class="slider-value" id="confValue">0.1</span>
+                                <span class="slider-value" id="confValue">0.15</span>
                             </div>
-                            <input type="range" id="confThreshold" min="0.1" max="0.9" value="0.1" step="0.05">
+                            <input type="range" id="confThreshold" min="0.1" max="0.9" value="0.15" step="0.05">
                         </div>
                         <div class="slider-group">
                             <div class="slider-header">
@@ -285,11 +293,15 @@
                             <div class="slider-header">
                                 <span class="slider-label">输入尺寸</span>
                             </div>
-                            <select id="inputSize" style="width: 100%; padding: 8px; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--secondary);">
-                                <option value="320">320×320（最快）</option>
-                                <option value="640" selected>640×640（推荐）</option>
-                                <option value="1280">1280×1280（最准）</option>
-                            </select>
+                            <div style="padding: 8px 12px; border-radius: 6px; background: var(--bg); color: var(--text-muted); font-size: 0.9rem; border: 1px solid var(--secondary);">
+                                640×640（模型固定输入）
+                            </div>
+                        </div>
+                        <div class="slider-group">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="areaFilter" checked style="width: 18px; height: 18px;">
+                                <span>面积过滤（剔除异常大小，仅 CFU）</span>
+                            </label>
                         </div>
                     </div>
                     
@@ -355,7 +367,7 @@
                 <div class="stats-panel">
                     <div class="stat-box success">
                         <span class="stat-number" id="statDetectedCount">0</span>
-                        <div class="stat-label">检测到的物体数</div>
+                        <div class="stat-label" id="statDetectedLabel">菌落数</div>
                     </div>
                     <div class="stat-box info">
                         <span class="stat-number" id="statAvgConfidence">0%</span>
@@ -388,19 +400,27 @@
         let modelLoaded = false;           // 模型是否加载成功
         let currentImage = null;            // 当前显示的图片 (Image 对象)
         let detections = [];                // 检测结果（已转换到原始图像坐标）
-        let currentModelType = 'coco';       // 当前模型类型: 'coco' 或 'cfu'
-        
+        let currentModelType = 'cfu';        // 下拉框选择（意图）
+        let activeModelType = 'cfu';         // 实际已加载的模型（结果解释以此为准）
+        let loadSeq = 0;                     // 加载序号，防止并发加载串台
+        let detecting = false;               // 防止重复点击检测
+
+        // 两个模型均为固定输入 [1,3,640,640]（见模型元数据 dynamic=False）
+        const INPUT_SIZE = 640;
+
         // 模型配置
         const MODEL_CONFIG = {
-            coco: {
-                url: 'yolo26n.onnx',
-                cacheKey: 'yolo26n_cached',
-                name: 'COCO 80类'
-            },
             cfu: {
                 url: 'yolo26n-cfu-102.onnx',
                 cacheKey: 'yolo26n_cfu_cached',
-                name: '菌落计数 (CFU)'
+                name: '菌落计数 (CFU)',
+                inputSize: 640
+            },
+            coco: {
+                url: 'yolo26n.onnx',
+                cacheKey: 'yolo26n_cached',
+                name: 'COCO 80类',
+                inputSize: 640
             }
         };
         
@@ -448,32 +468,25 @@
         }
         
         // ==================== 模型切换 ====================
+        function updateClassSelectorVisibility() {
+            classSelectorPanel.classList.toggle('hidden', currentModelType !== 'coco');
+        }
+        updateClassSelectorVisibility();
+
         modelSelect.addEventListener('change', async (e) => {
             currentModelType = e.target.value;
-            
-            // 更新UI：如果是CFU模型，隐藏类别选择器；否则显示
-            if (currentModelType === 'cfu') {
-                classSelectorPanel.classList.add('hidden');
-            } else {
-                classSelectorPanel.classList.remove('hidden');
-            }
-            
-            // 清空当前检测结果
-            resetApp(false); // 不弹出确认框
-            
-            // 重新加载模型
+            updateClassSelectorVisibility();
+
+            // 保留已上传图片，加载成功后自动重新检测
             showToast(`切换到 ${MODEL_CONFIG[currentModelType].name}，正在加载...`);
             await loadModel();
+            if (modelLoaded && currentImage) {
+                detectObjects(currentImage);
+            }
         });
-        
+
         // ==================== PWA 安装 ====================
         let deferredPrompt;
-        if ('serviceWorker' in navigator) {
-            const swCode = `self.addEventListener('install', e => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(clients.claim())); self.addEventListener('fetch', e => e.respondWith(fetch(e.request).catch(() => caches.match(e.request))));`;
-            const blob = new Blob([swCode], { type: 'application/javascript' });
-            const swUrl = URL.createObjectURL(blob);
-            navigator.serviceWorker.register(swUrl).then(() => console.log('SW registered'));
-        }
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
@@ -524,12 +537,13 @@
         
         async function getCachedModel(key) {
             const db = await openDB();
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 const tx = db.transaction('models', 'readonly');
                 const store = tx.objectStore('models');
                 const req = store.get(key);
-                req.onsuccess = () => resolve(req.result?.data);
-                req.onerror = () => resolve(null);
+                req.onsuccess = () => resolve(req.result?.data || null);
+                req.onerror = () => reject(req.error || new Error('读取缓存失败'));
+                tx.onabort = () => reject(tx.error || new Error('读取缓存事务中断'));
             });
         }
         
@@ -538,28 +552,45 @@
             return new Promise((resolve, reject) => {
                 const tx = db.transaction('models', 'readwrite');
                 const store = tx.objectStore('models');
-                const req = store.put({ key, data: arrayBuffer, timestamp: Date.now() });
-                req.onsuccess = resolve;
-                req.onerror = reject;
+                store.put({ key, data: arrayBuffer, timestamp: Date.now() });
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error || new Error('写入缓存失败'));
+                tx.onabort = () => reject(tx.error || new Error('写入缓存事务中断'));
             });
         }
         
         // ==================== 加载模型（自动缓存） ====================
         async function loadModel() {
+            const mySeq = ++loadSeq;
+            const hadSession = !!session;
+            const prevType = activeModelType;
+            modelLoaded = false;
+
+            // 注意：错误框位于启动屏内，因此加载期间必须让启动屏可见，
+            // 否则切换模型失败时用户看不到任何错误提示。
+            document.getElementById('splash').classList.remove('hidden');
             document.getElementById('loadingBar').style.display = 'block';
+            document.getElementById('loadingStatus').style.display = 'block';
             document.getElementById('loadingProgress').style.width = '0%';
             document.getElementById('loadingText').textContent = '正在检查缓存...';
             document.getElementById('loadingDetail').textContent = '';
             document.getElementById('errorBox').classList.remove('show');
-            
+            document.getElementById('modelSelect').disabled = true;
+
             const config = MODEL_CONFIG[currentModelType];
             const modelUrl = config.url;
             const cacheKey = config.cacheKey;
-            
+
             try {
-                // 1. 尝试从缓存读取
-                let modelData = await getCachedModel(cacheKey);
-                
+                // 1. 尝试从缓存读取（存储不可用不应阻断加载）
+                let modelData = null;
+                try {
+                    modelData = await getCachedModel(cacheKey);
+                } catch (cacheErr) {
+                    logDebug('读取缓存失败，改为在线下载: ' + (cacheErr.message || cacheErr), true);
+                }
+                if (mySeq !== loadSeq) return;
+
                 if (modelData) {
                     logDebug(`从缓存加载模型 (${currentModelType})`);
                     document.getElementById('loadingText').textContent = '从缓存加载模型...';
@@ -568,78 +599,111 @@
                     // 2. 从 GitHub 下载
                     logDebug(`未找到缓存，开始下载模型 (${currentModelType})`);
                     document.getElementById('loadingText').textContent = '正在下载模型 (首次使用)...';
-                    
+
                     const response = await fetch(modelUrl, { method: 'GET' });
                     if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    
+
                     const contentLength = response.headers.get('content-length');
                     const total = contentLength ? parseInt(contentLength) : 0;
-                    
+
                     const reader = response.body.getReader();
                     const chunks = [];
                     let received = 0;
-                    
+
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
+                        if (mySeq !== loadSeq) {
+                            try { reader.cancel(); } catch (_) {}
+                            return;
+                        }
                         chunks.push(value);
                         received += value.length;
-                        
+
                         if (total > 0) {
-                            const percent = (received / total * 100).toFixed(0);
+                            const percent = Math.min(100, (received / total * 100)).toFixed(0);
                             document.getElementById('loadingProgress').style.width = percent + '%';
-                            document.getElementById('loadingDetail').textContent = 
+                            document.getElementById('loadingDetail').textContent =
                                 `已下载 ${(received/1024/1024).toFixed(1)}MB / ${(total/1024/1024).toFixed(1)}MB`;
                         }
                     }
-                    
+
                     const arrayBuffer = new Uint8Array(received);
                     let position = 0;
                     for (const chunk of chunks) {
                         arrayBuffer.set(chunk, position);
                         position += chunk.length;
                     }
-                    
+
                     modelData = arrayBuffer.buffer;
-                    
-                    // 存入缓存
-                    await cacheModel(cacheKey, modelData);
-                    logDebug('模型已缓存到本地');
+
+                    // 存入缓存（失败不影响本次使用，例如配额不足/隐私模式）
+                    try {
+                        await cacheModel(cacheKey, modelData);
+                        logDebug('模型已缓存到本地');
+                    } catch (cacheErr) {
+                        logDebug('模型缓存失败（不影响本次使用）: ' + (cacheErr.message || cacheErr), true);
+                    }
                 }
-                
+
+                if (mySeq !== loadSeq) return;
+
                 document.getElementById('loadingProgress').style.width = '100%';
                 document.getElementById('loadingText').textContent = '正在初始化模型...';
-                
+
                 // 3. 初始化 ONNX Runtime
                 if (typeof ort === 'undefined') throw new Error('ONNX Runtime 库未加载');
-                
-                // 配置 WASM 路径（使用 CDN，自动匹配 SIMD/线程）
+
+                // 配置 WASM 路径（Service Worker 会缓存该 CDN 资源，首次联网后可离线）
                 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/';
-                // 移除线程和 SIMD 限制，让 ORT 自动选择最优配置
-                // ort.env.wasm.numThreads = 1;
-                // ort.env.wasm.simd = false;
-                
-                session = await ort.InferenceSession.create(modelData, {
+
+                const newSession = await ort.InferenceSession.create(modelData, {
                     executionProviders: ['wasm'],
                     graphOptimizationLevel: 'basic'
                 });
-                
+                if (mySeq !== loadSeq) return;
+
+                session = newSession;
                 modelLoaded = true;
+                activeModelType = currentModelType;
                 logDebug(`模型加载成功，输入: ${session.inputNames[0]}, 输出: ${session.outputNames[0]}`);
-                
+
                 // 更新界面
                 document.getElementById('splash').classList.add('hidden');
+                document.getElementById('continueBtn').style.display = 'none';
                 document.getElementById('versionBadge').textContent = config.name;
                 document.getElementById('modelStatus').innerHTML = `<span>✅</span><span>${config.name} 已加载</span>`;
                 showToast(`✅ ${config.name} 加载成功！`);
-                
+
             } catch (error) {
+                if (mySeq !== loadSeq) return;
+                modelLoaded = false;
                 let errorMsg = error.message || error.toString();
                 logDebug(`加载失败: ${errorMsg}`, true);
                 document.getElementById('loadingBar').style.display = 'none';
                 document.getElementById('loadingStatus').style.display = 'none';
-                document.getElementById('errorMessage').innerHTML = errorMsg;
+                document.getElementById('errorMessage').textContent = errorMsg;
                 document.getElementById('errorBox').classList.add('show');
+                document.getElementById('modelStatus').innerHTML = `<span>❌</span><span>模型加载失败</span>`;
+
+                // 若此前已有可用模型，允许回退继续使用，避免卡在启动屏
+                const continueBtn = document.getElementById('continueBtn');
+                if (hadSession) {
+                    modelLoaded = true;
+                    currentModelType = prevType;
+                    activeModelType = prevType;
+                    document.getElementById('modelSelect').value = prevType;
+                    updateClassSelectorVisibility();
+                    document.getElementById('modelStatus').innerHTML =
+                        `<span>⚠️</span><span>${MODEL_CONFIG[prevType].name}（切换失败）</span>`;
+                    continueBtn.style.display = 'inline-block';
+                } else {
+                    continueBtn.style.display = 'none';
+                }
+            } finally {
+                if (mySeq === loadSeq) {
+                    document.getElementById('modelSelect').disabled = false;
+                }
             }
         }
         
@@ -650,6 +714,15 @@
         function retryLoadModel() {
             loadModel();
         }
+
+        // 关闭错误提示，继续使用已加载的模型
+        function dismissError() {
+            document.getElementById('errorBox').classList.remove('show');
+            document.getElementById('continueBtn').style.display = 'none';
+            if (modelLoaded) {
+                document.getElementById('splash').classList.add('hidden');
+            }
+        }
         
         // ==================== 清除模型缓存 ====================
         async function clearModelCache() {
@@ -659,10 +732,13 @@
             
             try {
                 const db = await openDB();
-                const tx = db.transaction('models', 'readwrite');
-                const store = tx.objectStore('models');
-                await store.clear();
-                await tx.done;
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction('models', 'readwrite');
+                    tx.objectStore('models').clear();
+                    tx.oncomplete = resolve;
+                    tx.onerror = () => reject(tx.error || new Error('清除缓存失败'));
+                    tx.onabort = () => reject(tx.error || new Error('清除缓存事务中断'));
+                });
                 
                 showToast('🧹 模型缓存已清除');
                 logDebug('所有模型缓存已清除');
@@ -671,7 +747,7 @@
                 await loadModel();
             } catch (error) {
                 console.error('清除缓存失败:', error);
-                showToast('❌ 清除缓存失败: ' + error.message);
+                showToast('❌ 清除缓存失败: ' + (error.message || error));
             }
         }
         
@@ -691,11 +767,16 @@
         });
         
         function handleFile(e) {
-            if (e.target.files.length) processFile(e.target.files[0]);
+            const file = e.target.files && e.target.files[0];
+            // 立即清空，保证再次选择同一文件也能触发 change
+            e.target.value = '';
+            if (file) processFile(file);
         }
         
         function processFile(file) {
-            if (!file.type.startsWith('image/')) {
+            const isImage = (file.type && file.type.startsWith('image/')) ||
+                /\.(jpe?g|png|webp|bmp|gif|heic|heif)$/i.test(file.name || '');
+            if (!isImage) {
                 showToast('❌ 请选择图片文件');
                 return;
             }
@@ -708,7 +789,19 @@
                     displayImage(img);
                     detectObjects(img);
                 };
+                img.onerror = () => {
+                    showToast('❌ 图片解码失败，请更换图片');
+                    document.getElementById('loadingOverlay').classList.remove('active');
+                    viewer.classList.remove('active');
+                    uploadCard.style.display = 'block';
+                };
                 img.src = e.target.result;
+            };
+            reader.onerror = () => {
+                showToast('❌ 图片读取失败，请重试');
+                document.getElementById('loadingOverlay').classList.remove('active');
+                viewer.classList.remove('active');
+                uploadCard.style.display = 'block';
             };
             reader.readAsDataURL(file);
             
@@ -738,19 +831,24 @@
         // ==================== 核心检测逻辑 ====================
         async function detectObjects(img) {
             if (!modelLoaded || !session) {
-                showToast('⏳ 模型未加载');
+                showToast('⏳ 模型尚未加载完成');
                 return;
             }
-            
+            if (detecting) {
+                showToast('⏳ 正在检测中，请稍候');
+                return;
+            }
+
+            detecting = true;
             document.getElementById('loadingOverlay').classList.add('active');
             const startTime = performance.now();
             
             try {
                 const confThreshold = parseFloat(document.getElementById('confThreshold').value);
                 const iouThreshold = parseFloat(document.getElementById('iouThreshold').value);
-                const inputSize = parseInt(document.getElementById('inputSize').value);
+                const inputSize = INPUT_SIZE;  // 模型为固定输入 640x640
                 
-                const { tensor, scale, padX, padY } = await preprocessImage(img, inputSize);
+                const { tensor, scale, padX, padY } = preprocessImage(img, inputSize);
                 
                 const feeds = {};
                 feeds[session.inputNames[0]] = tensor;
@@ -764,7 +862,7 @@
                 const rawDetections = parseYOLOOutput(output, confThreshold, iouThreshold, inputSize, img.width, img.height, scale, padX, padY);
                 
                 // 根据当前模型类型处理检测结果
-                if (currentModelType === 'coco') {
+                if (activeModelType === 'coco') {
                     // COCO 模型：使用类别选择器过滤
                     const selectedOptions = Array.from(classSelect.selectedOptions);
                     if (selectedOptions.length === 0) {
@@ -782,41 +880,45 @@
                             }));
                     }
                 } else {
-                    // CFU 模型：直接使用所有检测框（假设只有一个类别，classId 可能为0）
-                    detections = rawDetections
-                        .map((d, idx) => ({
-                            ...d,
-                            id: idx,
-                            label: 'cfu',
-                            displayLabel: `菌落 ${idx+1}`
-                        }));
+                    // CFU 模型：单一类别
+                    detections = rawDetections.map((d, idx) => ({
+                        ...d,
+                        id: idx,
+                        label: 'cfu',
+                        displayLabel: `菌落 ${idx+1}`
+                    }));
+
+                    // 按菌落面积过滤异常框（过小噪点 / 过大粘连团）
+                    if (document.getElementById('areaFilter').checked) {
+                        detections = filterColonyArea(detections, img.width * img.height);
+                    }
                 }
-                
-                // tensor.dispose(); // 已确认无此方法，故注释
                 
                 const processTime = Math.round(performance.now() - startTime);
                 updateStats(processTime);
                 renderDetections();
                 
-                showToast(`✅ 检测到 ${detections.length} 个物体`);
+                const noun = activeModelType === 'cfu' ? '个菌落' : '个物体';
+                showToast(`✅ 检测到 ${detections.length} ${noun}`);
                 
             } catch (error) {
                 console.error(error);
                 logDebug(`检测错误: ${error.message}`, true);
                 showToast('❌ 检测失败: ' + error.message);
+            } finally {
+                detecting = false;
+                document.getElementById('loadingOverlay').classList.remove('active');
             }
-            
-            document.getElementById('loadingOverlay').classList.remove('active');
         }
         
-        // 预处理：letterbox 填充，返回 tensor 和填充参数
-        async function preprocessImage(img, inputSize) {
+        // 预处理：letterbox 填充（114 灰），直接写入 NCHW Float32Array
+        function preprocessImage(img, inputSize) {
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = inputSize;
             tempCanvas.height = inputSize;
-            const tCtx = tempCanvas.getContext('2d');
+            const tCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
             
-            tCtx.fillStyle = '#808080';
+            tCtx.fillStyle = 'rgb(114,114,114)';
             tCtx.fillRect(0, 0, inputSize, inputSize);
             
             const scale = Math.min(inputSize / img.width, inputSize / img.height);
@@ -829,20 +931,20 @@
             
             const imageData = tCtx.getImageData(0, 0, inputSize, inputSize);
             const data = imageData.data;
+            const planeSize = inputSize * inputSize;
+            const inputData = new Float32Array(planeSize * 3);
             
-            const red = [], green = [], blue = [];
-            for (let i = 0; i < data.length; i += 4) {
-                red.push(data[i] / 255);
-                green.push(data[i + 1] / 255);
-                blue.push(data[i + 2] / 255);
+            for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+                inputData[p] = data[i] / 255;
+                inputData[p + planeSize] = data[i + 1] / 255;
+                inputData[p + planeSize * 2] = data[i + 2] / 255;
             }
-            const inputData = new Float32Array(red.concat(green).concat(blue));
             
             const tensor = new ort.Tensor('float32', inputData, [1, 3, inputSize, inputSize]);
             return { tensor, scale, padX, padY };
         }
         
-        // 解析 YOLO 输出 [1,300,6]
+        // 解析 YOLO 输出 [1,N,6]（x1,y1,x2,y2,conf,class）
         function parseYOLOOutput(output, confThreshold, iouThreshold, inputSize, origWidth, origHeight, scale, padX, padY) {
             const data = output.data;
             const dims = output.dims;
@@ -872,6 +974,8 @@
                     const clampedY1 = Math.max(0, Math.min(origHeight, origY1));
                     const clampedX2 = Math.max(0, Math.min(origWidth, origX2));
                     const clampedY2 = Math.max(0, Math.min(origHeight, origY2));
+                    
+                    if (clampedX2 <= clampedX1 || clampedY2 <= clampedY1) continue;
                     
                     boxes.push({
                         x1: clampedX1,
@@ -903,6 +1007,8 @@
                 
                 for (let j = i + 1; j < boxes.length; j++) {
                     if (suppressed[j]) continue;
+                    // 仅在相同类别之间抑制，避免不同类别互相压制
+                    if (boxes[i].classId !== boxes[j].classId) continue;
                     
                     const x1 = Math.max(boxes[i].x1, boxes[j].x1);
                     const y1 = Math.max(boxes[i].y1, boxes[j].y1);
@@ -922,6 +1028,24 @@
             return picked;
         }
         
+        // 基于面积中位数过滤异常菌落框（0.4x ~ 2.5x 中位数）
+        function filterColonyArea(dets, imageArea) {
+            if (dets.length < 3) return dets;
+            
+            const areaOf = (d) => Math.max(0, d.x2 - d.x1) * Math.max(0, d.y2 - d.y1);
+            const sortedAreas = dets.map(areaOf).sort((a, b) => a - b);
+            const median = sortedAreas[Math.floor(sortedAreas.length / 2)];
+            if (!(median > 0)) return dets;
+            
+            const minArea = Math.max(median * 0.4, imageArea * 2e-6);
+            const maxArea = median * 2.5;
+            
+            return dets.filter(d => {
+                const a = areaOf(d);
+                return a >= minArea && a <= maxArea;
+            });
+        }
+        
         // ==================== 渲染检测结果（修改点：CFU模型使用蓝点）====================
         function renderDetections() {
             overlayLayer.innerHTML = '';
@@ -930,18 +1054,22 @@
             const showLabels = document.getElementById('showLabels').checked;
             const showConfidence = document.getElementById('showConfidence').checked;
             
-            if (currentModelType === 'cfu') {
+            const isCfu = activeModelType === 'cfu';
+            const dotSize = Math.max(4, Math.min(16, 6 * zoom));
+            
+            if (isCfu) {
                 // CFU 模型：绘制蓝色实心点（中心点）
                 detections.forEach((det, idx) => {
                     // 计算中心点坐标（原始坐标 * zoom）
                     const cx = ((det.x1 + det.x2) / 2) * zoom;
                     const cy = ((det.y1 + det.y2) / 2) * zoom;
                     
-                    // 绘制圆点（直径为6px，偏移3px使其中心对齐）
                     const dot = document.createElement('div');
                     dot.className = 'cfu-dot';
-                    dot.style.left = (cx - 3) + 'px';
-                    dot.style.top = (cy - 3) + 'px';
+                    dot.style.width = dotSize + 'px';
+                    dot.style.height = dotSize + 'px';
+                    dot.style.left = (cx - dotSize / 2) + 'px';
+                    dot.style.top = (cy - dotSize / 2) + 'px';
                     
                     // 点击事件
                     dot.onclick = () => {
@@ -953,11 +1081,12 @@
                     if (showLabels || showConfidence) {
                         const label = document.createElement('div');
                         label.className = 'cfu-label';
-                        label.style.left = (cx + 6) + 'px';
-                        label.style.top = (cy - 8) + 'px';
-                        let text = `${idx+1}`;
-                        if (showConfidence) text += ` ${(det.confidence*100).toFixed(0)}%`;
-                        label.textContent = text;
+                        label.style.left = (cx + dotSize / 2 + 2) + 'px';
+                        label.style.top = (cy - dotSize / 2 - 6) + 'px';
+                        const parts = [];
+                        if (showLabels) parts.push(idx + 1);
+                        if (showConfidence) parts.push(`${(det.confidence*100).toFixed(0)}%`);
+                        label.textContent = parts.join(' ');
                         overlayLayer.appendChild(label);
                     }
                 });
@@ -1008,17 +1137,20 @@
         }
         
         function updateStats(processTime) {
-            document.getElementById('statDetectedCount').textContent = detections.length;
-            document.getElementById('detectedCount').innerHTML = `<span>🔍</span><span>${detections.length}个物体</span>`;
+            const isCfu = activeModelType === 'cfu';
+            const noun = isCfu ? '菌落' : '物体';
+            const count = detections.length;
             
-            const avgConf = detections.length > 0 
-                ? (detections.reduce((sum, d) => sum + d.confidence, 0) / detections.length * 100).toFixed(0)
+            document.getElementById('statDetectedCount').textContent = count;
+            document.getElementById('statDetectedLabel').textContent = isCfu ? '菌落数' : '检测到的物体数';
+            document.getElementById('detectedCount').innerHTML = `<span>🔍</span><span>${count}个${noun}</span>`;
+            
+            const avgConf = count > 0 
+                ? (detections.reduce((sum, d) => sum + d.confidence, 0) / count * 100).toFixed(0)
                 : 0;
             document.getElementById('statAvgConfidence').textContent = avgConf + '%';
             document.getElementById('statProcessTime').textContent = processTime + 'ms';
-            
-            const fps = Math.round(1000 / (processTime || 1));
-            document.getElementById('fpsStat').innerHTML = `<span>⚡</span><span>${fps} FPS</span>`;
+            document.getElementById('fpsStat').innerHTML = `<span>⚡</span><span>${processTime}ms</span>`;
         }
         
         // ==================== 事件绑定与操作函数 ====================
@@ -1054,30 +1186,53 @@
             eCtx.lineWidth = 3;
             eCtx.font = 'bold 16px Arial';
             
+            // 按图片尺寸缩放标注，避免大图上点/字过小
+            const scaleFactor = Math.max(1, Math.min(currentImage.width, currentImage.height) / 640);
+            const dotRadius = Math.max(4, Math.min(24, 5 * scaleFactor));
+            const fontSize = Math.max(12, Math.min(28, Math.round(14 * scaleFactor)));
+            
             detections.forEach((det, idx) => {
                 const { x1, y1, x2, y2, classId, confidence } = det;
                 const width = x2 - x1;
                 const height = y2 - y1;
                 
-                if (currentModelType === 'cfu') {
-                    // 保存时也绘制蓝色点（但为了清晰，可以保留框或点，这里简单绘制一个蓝色点）
+                if (activeModelType === 'cfu') {
                     const cx = (x1 + x2) / 2;
                     const cy = (y1 + y2) / 2;
                     eCtx.fillStyle = '#3366ff';
                     eCtx.beginPath();
-                    eCtx.arc(cx, cy, 5, 0, 2 * Math.PI);
+                    eCtx.arc(cx, cy, dotRadius, 0, 2 * Math.PI);
                     eCtx.fill();
                     eCtx.strokeStyle = 'white';
-                    eCtx.lineWidth = 1;
+                    eCtx.lineWidth = Math.max(1, dotRadius / 4);
                     eCtx.stroke();
                     
-                    let label = `#${idx+1}`;
-                    if (document.getElementById('showConfidence').checked) label += ` ${(confidence*100).toFixed(0)}%`;
-                    eCtx.fillStyle = 'black';
-                    eCtx.font = 'bold 12px Arial';
-                    eCtx.fillText(label, cx + 8, cy - 8);
+                    const showLabels = document.getElementById('showLabels').checked;
+                    const showConfidence = document.getElementById('showConfidence').checked;
+                    if (showLabels || showConfidence) {
+                        const parts = [];
+                        if (showLabels) parts.push(`#${idx+1}`);
+                        if (showConfidence) parts.push(`${(confidence*100).toFixed(0)}%`);
+                        const text = parts.join(' ');
+                        
+                        eCtx.font = `bold ${fontSize}px Arial`;
+                        const padX = Math.round(fontSize * 0.4);
+                        const padY = Math.round(fontSize * 0.25);
+                        const textWidth = eCtx.measureText(text).width;
+                        const boxX = cx + dotRadius + 4;
+                        const boxY = cy - dotRadius - fontSize - padY * 2;
+                        
+                        // 深色底 + 白字，保证在明亮菌落图上也可读
+                        eCtx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                        eCtx.fillRect(boxX, boxY, textWidth + padX * 2, fontSize + padY * 2);
+                        eCtx.fillStyle = '#ffffff';
+                        eCtx.textBaseline = 'top';
+                        eCtx.fillText(text, boxX + padX, boxY + padY);
+                    }
                 } else {
                     // COCO 模型保持框
+                    eCtx.textBaseline = 'alphabetic';
+                    eCtx.font = 'bold 16px Arial';
                     const hue = (classId * 37) % 360;
                     eCtx.strokeStyle = `hsl(${hue}, 80%, 60%)`;
                     eCtx.strokeRect(x1, y1, width, height);
@@ -1100,21 +1255,24 @@
         
         function copyStats() {
             let selectedInfo = '';
-            if (currentModelType === 'coco') {
+            if (activeModelType === 'coco') {
                 const selectedClasses = Array.from(classSelect.selectedOptions).map(opt => opt.textContent).join(', ');
                 selectedInfo = `选中类别：${selectedClasses || '无'}`;
             } else {
                 selectedInfo = '模型：菌落计数 (CFU)';
             }
             
+            const isCfu = activeModelType === 'cfu';
             const stats = `检测结果：
-检测到物体数：${detections.length}
+检测到${isCfu ? '菌落' : '物体'}数：${detections.length}
 平均置信度：${document.getElementById('statAvgConfidence').textContent}
 处理时间：${document.getElementById('statProcessTime').textContent}
 图像尺寸：${document.getElementById('statImageSize').textContent}
 ${selectedInfo}`;
             
-            navigator.clipboard.writeText(stats).then(() => showToast('📋 统计信息已复制'));
+            navigator.clipboard.writeText(stats)
+                .then(() => showToast('📋 统计信息已复制'))
+                .catch(() => showToast('❌ 复制失败，请手动选择文本'));
         }
         
         function resetApp(confirmNeeded = true) {
@@ -1125,7 +1283,22 @@ ${selectedInfo}`;
             uploadCard.style.display = 'block';
             viewer.classList.remove('active');
             overlayLayer.innerHTML = '';
-            document.getElementById('detectedCount').innerHTML = '<span>🔍</span><span>0个物体</span>';
+            
+            canvas.width = 0;
+            canvas.height = 0;
+            
+            document.getElementById('zoomSlider').value = 1;
+            document.getElementById('zoomValue').textContent = '1';
+            
+            // 重置全部统计信息
+            document.getElementById('statDetectedCount').textContent = '0';
+            document.getElementById('statDetectedLabel').textContent = activeModelType === 'cfu' ? '菌落数' : '检测到的物体数';
+            document.getElementById('statAvgConfidence').textContent = '0%';
+            document.getElementById('statProcessTime').textContent = '0ms';
+            document.getElementById('statImageSize').textContent = '-';
+            document.getElementById('detectedCount').innerHTML =
+                `<span>🔍</span><span>0个${activeModelType === 'cfu' ? '菌落' : '物体'}</span>`;
+            document.getElementById('fpsStat').innerHTML = '<span>⚡</span><span>0ms</span>';
         }
     </script>
     <script>
