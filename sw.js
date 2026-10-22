@@ -4,11 +4,19 @@
 // ---------- 1. 动态路径与缓存名称 ----------
 // 获取当前 sw.js 所在的目录路径（例如 '/pwa1/'）
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
-// 构建带项目标识的缓存名称，避免多项目冲突
-// 例如 '/pwa1/' -> 'pwa-cache-pwa1-v3'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v3`;
-// ONNX Runtime 的 CDN 资源单独缓存（跨版本隔离，激活时不清理）
-const CDN_CACHE_NAME = 'ort-cdn-v1';
+// 项目标识：目录最后一段（'/' -> 'root'），同一域名下多 PWA 共存时互不干扰
+const PROJECT_ID = (BASE_PATH.match(/([^/]+)\/?$/) || [, 'root'])[1];
+// 缓存版本号：静态资源变更时 +1
+const CACHE_VERSION = 4;
+// 缓存名前缀，形如 'pwa-cache-cfu_count--v'
+const CACHE_PREFIX = `pwa-cache-${PROJECT_ID}--v`;
+// 例如 '/cfu_count/' -> 'pwa-cache-cfu_count--v4'
+const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
+// ONNX Runtime 的 CDN 资源单独缓存（按项目隔离，激活时只清理本项目旧版本）
+const CDN_CACHE_PREFIX = `ort-cdn-${PROJECT_ID}--v`;
+const CDN_CACHE_NAME = `${CDN_CACHE_PREFIX}1`;
+// 旧版本命名（无法用前缀匹配），仅清理本项目的历史缓存
+const LEGACY_CACHE_NAMES = [`pwa-cache${BASE_PATH.replace(/\//g, '-')}v3`];
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
@@ -76,11 +84,16 @@ self.addEventListener('activate', (event) => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cache => {
-          // 只删除以 'pwa-cache-' 开头且不属于当前项目的缓存
-          if (cache.startsWith('pwa-cache-') && cache !== CACHE_NAME) {
-            console.log('[SW] 删除旧缓存:', cache);
+          // 仅删除"本项目前缀 + 非当前版本"的缓存，其它 PWA 的缓存一律不动
+          const isOwnOldVersion =
+            (cache.startsWith(CACHE_PREFIX) && cache !== CACHE_NAME) ||
+            (cache.startsWith(CDN_CACHE_PREFIX) && cache !== CDN_CACHE_NAME) ||
+            LEGACY_CACHE_NAMES.includes(cache);
+          if (isOwnOldVersion) {
+            console.log('[SW] 删除本项目旧缓存:', cache);
             return caches.delete(cache);
           }
+          return undefined;
         })
       );
     }).then(() => self.clients.claim()) // 立即控制所有页面
@@ -118,8 +131,9 @@ self.addEventListener('fetch', (event) => {
           return networkResponse;
         })
         .catch(async () => {
-          // 网络失败，尝试从缓存获取
-          const cachedResponse = await caches.match(request);
+          // 网络失败，只从本项目缓存获取，避免误命中其它 PWA 的同名资源
+          const cache = await caches.open(CACHE_NAME);
+          const cachedResponse = await cache.match(request);
           if (cachedResponse) {
             console.log('[SW] 离线模式，使用缓存页面:', url.pathname);
             return cachedResponse;
